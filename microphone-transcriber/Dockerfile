@@ -1,4 +1,4 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=python:3.11-slim-bookworm
 FROM ${BUILD_FROM}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -16,4 +16,3 @@ COPY run.sh /run.sh
 RUN chmod 0755 /run.sh
 
 CMD ["/run.sh"]
-

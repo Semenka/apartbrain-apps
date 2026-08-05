@@ -1,11 +1,12 @@
 name: "Apartbrain Conversation Transcriber"
-version: "0.1.0"
+version: "0.1.1"
 slug: "apartbrain_transcriber"
 description: "Privacy-first USB microphone recording, local transcription, and weekly digests"
 url: "https://github.com/Semenka/apartbrain-apps/tree/main/microphone-transcriber"
 arch:
   - aarch64
   - amd64
+image: "ghcr.io/semenka/apartbrain-transcriber"
 startup: application
 boot: auto
 init: false

@@ -34,7 +34,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/semenka/apartbrain-transcriber:0.1.1
+            ghcr.io/semenka/apartbrain-transcriber:0.1.2
             ghcr.io/semenka/apartbrain-transcriber:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

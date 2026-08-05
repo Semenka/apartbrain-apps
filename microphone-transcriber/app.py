@@ -164,7 +164,11 @@ def transcription_loop() -> None:
     while not STOP.is_set():
         try:
             done = {p.stem for p in TRANSCRIPT_DIR.glob("*.md")}
-            pending = [p for p in sorted(AUDIO_DIR.glob("*.flac")) if p.stem not in done]
+            pending = [
+                p
+                for p in sorted(AUDIO_DIR.glob("*.flac"))
+                if not p.name.endswith(".partial.flac") and p.stem not in done
+            ]
             for audio in pending:
                 if STOP.is_set():
                     return

@@ -1,5 +1,5 @@
 name: "Apartbrain Conversation Transcriber"
-version: "0.2.0"
+version: "0.2.1"
 slug: "apartbrain_transcriber"
 description: "Privacy-first USB microphone recording, local transcription, and weekly digests"
 url: "https://github.com/Semenka/apartbrain-apps/tree/main/microphone-transcriber"

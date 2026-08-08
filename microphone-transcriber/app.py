@@ -721,7 +721,8 @@ class Handler(BaseHTTPRequestHandler):
         body = path.read_text(errors="replace")
         escaped = html.escape(body)
         return self.respond_html(
-            "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
             "<style>body{font:16px system-ui;max-width:900px;margin:2rem auto;padding:1rem;"
             "background:#101827;color:#eef}pre{white-space:pre-wrap;line-height:1.5}</style></head>"
             f"<body><pre>{escaped}</pre></body></html>"
@@ -742,7 +743,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.respond_json({"ok": True, "recording_requested": enabled})
 
     def respond_json(self, value: dict, status: int = 200):
-        data = json.dumps(value).encode()
+        data = json.dumps(value, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -750,7 +751,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def respond_html(self, value: str):
-        data = value.encode()
+        data = value.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -769,11 +770,11 @@ def render_ui() -> str:
     enrolled = ", ".join(state.get("enrolled_speakers") or []) or "None"
     enrollment = html.escape(str(state.get("enrollment_target") or "None"))
     speaker_buttons = "".join(
-        f"<button onclick=\"location.href='api/enroll/{html.escape(name)}'\">Enroll {html.escape(name)}</button>"
+        f"<button onclick=\"location.href='api/enroll/{html.escape(name)}'\">I consent — enroll {html.escape(name)}</button>"
         for name in OPTIONS["allowed_speakers"]
     )
     return f"""<!doctype html>
-<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{{font:16px system-ui;max-width:700px;margin:2rem auto;padding:1rem;background:#101827;color:#eef}}
 button{{font:inherit;padding:.7rem 1rem;margin:.3rem;border:0;border-radius:.6rem}}a{{color:#7dd3fc}}code{{color:#fde68a}}</style></head>
 <body><h1>Apartment conversation recorder</h1>
@@ -785,7 +786,11 @@ button{{font:inherit;padding:.7rem 1rem;margin:.3rem;border:0;border-radius:.6re
 <strong>Conversation triggered by:</strong> {html.escape(str(state.get("triggered_by") or "None"))}<br>
 <strong>Last error:</strong> {error}</p>
 <h2>Consent-based voice enrollment</h2>
-<p>With the speaker gate enabled, persistent recording starts only after an enrolled speaker is verified twice. Ask each person for consent, click their button, and have them speak naturally for about 10 seconds.</p>
+<p><strong>Consent is personal:</strong> the person being enrolled must agree before their voice sample is captured.</p>
+<ol><li>Ask the person to confirm that they consent to apartment conversation recording.</li>
+<li>That person selects their own <strong>I consent — enroll</strong> button below.</li>
+<li>They speak naturally near the microphone for about 10 seconds, until their name appears under Enrolled speakers.</li>
+<li>After enrollment, recording starts automatically only when an enrolled speaker is verified twice during a real conversation.</li></ol>
 {speaker_buttons}
 <button onclick="location.href='api/enrollment/cancel'">Cancel enrollment</button>
 <button onclick="location.href='api/recording/stop'">Stop recording</button>

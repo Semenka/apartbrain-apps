@@ -24,9 +24,10 @@ link to the full timestamped transcript.
 3. Install **Apartbrain Conversation Transcriber**.
 4. Start it once with `recording_enabled: false`; open its web UI and confirm
    there is no microphone error.
-5. With each person's explicit consent, select **Enroll Vika**, **Enroll Ale**,
-   or **Enroll Andrey**, then have that person speak naturally for about
-   10 seconds. The web UI shows completed enrollments.
+5. Open the app's **Web UI**. With each person's explicit consent, have that
+   person select their own **I consent — enroll Vika**, **I consent — enroll
+   Ale**, or **I consent — enroll Andrey** button, then speak naturally for
+   about 10 seconds. The web UI shows completed enrollments.
 6. Set `recording_enabled: true` and restart the app. The configured maximum
    segment length is 30 minutes.
 7. Have an enrolled person initiate a real conversation, then verify that

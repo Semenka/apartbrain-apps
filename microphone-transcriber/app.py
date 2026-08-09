@@ -18,6 +18,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
+from conversation_catalog import ConversationCatalog
 from faster_whisper import WhisperModel
 from speaker_gate import SAMPLE_RATE, SpeakerGate
 
@@ -62,6 +63,12 @@ def load_options() -> dict:
         "speaker_confirmation_window_seconds": 30,
         "conversation_hold_minutes": 5,
         "conversation_reply_window_seconds": 30,
+        "vika_display_name": "Victoria",
+        "unidentified_speaker_label": "Victoria",
+        "transcription_prompt": (
+            "Apartment family conversation in Russian, Italian, or English. "
+            "Speaker names: Victoria, Ale, and Andrey. Preserve the spoken language."
+        ),
     }
     try:
         defaults.update(json.loads(OPTIONS_PATH.read_text()))
@@ -71,6 +78,13 @@ def load_options() -> dict:
 
 
 OPTIONS = load_options()
+CATALOG = ConversationCatalog(
+    OUTPUT_ROOT,
+    speaker_aliases={
+        "Vika": str(OPTIONS["vika_display_name"]),
+        "participant": str(OPTIONS["unidentified_speaker_label"]),
+    },
+)
 RUNTIME_RECORDING = bool(OPTIONS["recording_enabled"]) and not bool(
     OPTIONS["speaker_gate_enabled"]
 )
@@ -86,6 +100,11 @@ STATUS = {
     "enrolled_speakers": [],
     "enrollment_target": None,
     "triggered_by": None,
+    "catalog_database": str(CATALOG.database_path),
+    "catalog_export_dir": str(CATALOG.export_dir),
+    "catalog_conversations": 0,
+    "catalog_transcribed": 0,
+    "catalog_updated_at": None,
 }
 
 
@@ -101,6 +120,44 @@ def write_status(**updates) -> None:
 
 def utc_stamp() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+
+
+def display_speaker(name: str | None) -> str:
+    if name == "Vika":
+        return str(OPTIONS["vika_display_name"])
+    if name:
+        return name
+    return str(OPTIONS["unidentified_speaker_label"])
+
+
+def refresh_catalog_status() -> None:
+    summary = CATALOG.summary()
+    write_status(
+        catalog_database=str(CATALOG.database_path),
+        catalog_export_dir=str(CATALOG.export_dir),
+        catalog_conversations=summary["conversations"],
+        catalog_transcribed=summary["transcribed"],
+        catalog_updated_at=summary["last_updated"],
+    )
+
+
+def catalog_event(
+    event_type: str,
+    conversation_id: str | None = None,
+    speaker: str | None = None,
+    details: dict | None = None,
+) -> None:
+    try:
+        CATALOG.record_event(
+            event_type,
+            conversation_id=conversation_id,
+            speaker=display_speaker(speaker) if speaker else None,
+            details=details,
+        )
+        refresh_catalog_status()
+    except Exception as exc:
+        LOG.exception("Conversation catalog event failed")
+        write_status(last_error=f"catalog: {exc}")
 
 
 def get_gate() -> SpeakerGate:
@@ -135,8 +192,15 @@ def speaker_monitor_loop() -> None:
             gate_status = gate.status()
             write_status(
                 gate_ready=len(gate_status["enrolled_speakers"]) > 0,
-                enrolled_speakers=gate_status["enrolled_speakers"],
-                enrollment_target=gate_status["enrollment_target"],
+                enrolled_speakers=[
+                    display_speaker(name)
+                    for name in gate_status["enrolled_speakers"]
+                ],
+                enrollment_target=(
+                    display_speaker(gate_status["enrollment_target"])
+                    if gate_status["enrollment_target"]
+                    else None
+                ),
             )
             cmd = [
                 "ffmpeg",
@@ -178,7 +242,9 @@ def speaker_monitor_loop() -> None:
                             now + int(OPTIONS["conversation_hold_minutes"]) * 60
                         )
                         SESSION_TRIGGERED_BY = name
-                        write_status(triggered_by=name, last_error=None)
+                        write_status(
+                            triggered_by=display_speaker(name), last_error=None
+                        )
                         confirmations.clear()
                         continue
 
@@ -197,18 +263,27 @@ def speaker_monitor_loop() -> None:
                                 now + int(OPTIONS["conversation_hold_minutes"]) * 60
                             )
                             SESSION_TRIGGERED_BY = name
-                            write_status(triggered_by=name, last_error=None)
+                            write_status(
+                                triggered_by=display_speaker(name), last_error=None
+                            )
                             if first_trigger:
                                 LOG.info(
                                     "Conversation recording triggered by enrolled speaker %s",
                                     name,
                                 )
+                                catalog_event(
+                                    "recording_triggered",
+                                    speaker=name,
+                                    details={"canonical_speaker": name},
+                                )
                         confirmations.clear()
 
                 if RUNTIME_RECORDING and now >= SESSION_ACTIVE_UNTIL:
+                    ended_by = SESSION_TRIGGERED_BY
                     RUNTIME_RECORDING = False
                     SESSION_TRIGGERED_BY = None
                     write_status(triggered_by=None)
+                    catalog_event("conversation_session_ended", speaker=ended_by)
                     LOG.info(
                         "Conversation session ended after enrolled-speaker inactivity"
                     )
@@ -217,8 +292,15 @@ def speaker_monitor_loop() -> None:
                     current = gate.status()
                     current_gate_status = {
                         "gate_ready": len(current["enrolled_speakers"]) > 0,
-                        "enrolled_speakers": current["enrolled_speakers"],
-                        "enrollment_target": current["enrollment_target"],
+                        "enrolled_speakers": [
+                            display_speaker(name)
+                            for name in current["enrolled_speakers"]
+                        ],
+                        "enrollment_target": (
+                            display_speaker(current["enrollment_target"])
+                            if current["enrollment_target"]
+                            else None
+                        ),
                         "enrollment_progress": current["enrollment_progress"],
                     }
                     if current_gate_status != last_gate_status:
@@ -256,6 +338,7 @@ def recording_loop() -> None:
         stamp = utc_stamp()
         partial = AUDIO_DIR / f"{stamp}.partial.flac"
         final = AUDIO_DIR / f"{stamp}.flac"
+        trigger_speaker = SESSION_TRIGGERED_BY
         seconds = int(OPTIONS["segment_minutes"]) * 60
         cmd = [
             "ffmpeg",
@@ -282,7 +365,7 @@ def recording_loop() -> None:
         LOG.info(
             "Recording up to %s minutes, triggered by %s",
             OPTIONS["segment_minutes"],
-            SESSION_TRIGGERED_BY or "manual mode",
+            trigger_speaker or "manual mode",
         )
         started = time.monotonic()
         recorder = None
@@ -302,6 +385,18 @@ def recording_loop() -> None:
             if partial.is_file() and partial.stat().st_size > 1024 and duration >= 5:
                 partial.replace(final)
                 write_status(last_audio=final.name)
+                try:
+                    CATALOG.record_audio(
+                        final,
+                        display_speaker(trigger_speaker)
+                        if trigger_speaker
+                        else None,
+                        duration,
+                    )
+                    refresh_catalog_status()
+                except Exception as exc:
+                    LOG.exception("Conversation catalog recording update failed")
+                    write_status(last_error=f"catalog: {exc}")
                 WAKE_TRANSCRIBER.set()
             else:
                 partial.unlink(missing_ok=True)
@@ -355,9 +450,11 @@ def decode_audio_pcm(path: Path) -> np.ndarray:
 
 def transcribe_file(audio_path: Path) -> Path:
     language = None if OPTIONS["language"] == "auto" else str(OPTIONS["language"])
+    prompt = str(OPTIONS["transcription_prompt"]).strip() or None
     segments, info = get_model().transcribe(
         str(audio_path),
         language=language,
+        initial_prompt=prompt,
         vad_filter=True,
         beam_size=5,
     )
@@ -375,7 +472,11 @@ def transcribe_file(audio_path: Path) -> Path:
             )
 
     rows = []
-    filter_note = "speaker gate disabled"
+    filter_note = (
+        "speaker gate enabled; no speech candidates"
+        if bool(OPTIONS["speaker_gate_enabled"])
+        else "speaker gate disabled"
+    )
     if bool(OPTIONS["speaker_gate_enabled"]) and candidates:
         pcm = decode_audio_pcm(audio_path)
         gate = get_gate()
@@ -409,11 +510,20 @@ def transcribe_file(audio_path: Path) -> Path:
             f"{len(identified_anchors)} enrolled-speaker anchors plus session opening"
         )
 
+    catalog_turns = []
     for candidate in candidates:
-        speaker = candidate["speaker"] or "participant"
+        speaker = display_speaker(candidate["speaker"])
         rows.append(
             f"[{format_offset(candidate['start'])}–{format_offset(candidate['end'])}] "
             f"[{speaker}] {candidate['text']}"
+        )
+        catalog_turns.append(
+            {
+                "start_seconds": candidate["start"],
+                "end_seconds": candidate["end"],
+                "speaker": speaker,
+                "text": candidate["text"],
+            }
         )
 
     try:
@@ -438,9 +548,27 @@ def transcribe_file(audio_path: Path) -> Path:
     )
     output = TRANSCRIPT_DIR / f"{audio_path.stem}.md"
     temp = output.with_suffix(".tmp")
-    temp.write_text(body)
+    temp.write_text(body, encoding="utf-8")
     temp.replace(output)
-    write_status(last_transcript=output.name, last_error=None)
+    catalog_ok = True
+    try:
+        CATALOG.record_transcript(
+            audio_path,
+            output,
+            str(info.language),
+            float(info.language_probability),
+            filter_note,
+            catalog_turns,
+        )
+        refresh_catalog_status()
+    except Exception as exc:
+        catalog_ok = False
+        LOG.exception("Conversation catalog transcription update failed")
+        write_status(last_error=f"catalog: {exc}")
+    if catalog_ok:
+        write_status(last_transcript=output.name, last_error=None)
+    else:
+        write_status(last_transcript=output.name)
     LOG.info("Transcribed %s -> %s", audio_path.name, output.name)
     return output
 
@@ -684,6 +812,15 @@ class Handler(BaseHTTPRequestHandler):
         route = self.path.split("?", 1)[0].rstrip("/") or "/"
         if route == "/api/status":
             return self.respond_json(STATUS)
+        if route == "/api/catalog":
+            return self.respond_json(
+                {
+                    "summary": CATALOG.summary(),
+                    "recent": CATALOG.recent(100),
+                    "database": str(CATALOG.database_path),
+                    "exports": str(CATALOG.export_dir),
+                }
+            )
         if route == "/api/digest":
             path, url = make_digest(7, send=True)
             return self.respond_json(
@@ -697,8 +834,10 @@ class Handler(BaseHTTPRequestHandler):
             name = route.removeprefix("/api/enroll/")
             try:
                 get_gate().start_enrollment(name)
-                write_status(enrollment_target=name)
-                return self.respond_json({"ok": True, "enrolling": name})
+                write_status(enrollment_target=display_speaker(name))
+                return self.respond_json(
+                    {"ok": True, "enrolling": display_speaker(name)}
+                )
             except ValueError as exc:
                 return self.respond_json({"ok": False, "error": str(exc)}, status=400)
         if route == "/api/enrollment/cancel":
@@ -707,6 +846,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond_json({"ok": True})
         if route.startswith("/transcript/"):
             return self.serve_transcript(route.removeprefix("/transcript/"))
+        if route.startswith("/catalog/"):
+            return self.serve_catalog_file(route.removeprefix("/catalog/"))
         if route == "/":
             return self.respond_html(render_ui())
         self.send_error(404)
@@ -727,6 +868,45 @@ class Handler(BaseHTTPRequestHandler):
             "background:#101827;color:#eef}pre{white-space:pre-wrap;line-height:1.5}</style></head>"
             f"<body><pre>{escaped}</pre></body></html>"
         )
+
+    def serve_catalog_file(self, filename: str):
+        files = {
+            "conversations.sqlite3": (
+                CATALOG.export_dir / "conversations.sqlite3",
+                "application/vnd.sqlite3",
+            ),
+            "conversations.csv": (
+                CATALOG.export_dir / "conversations.csv",
+                "text/csv; charset=utf-8",
+            ),
+            "turns.csv": (
+                CATALOG.export_dir / "turns.csv",
+                "text/csv; charset=utf-8",
+            ),
+            "events.csv": (
+                CATALOG.export_dir / "events.csv",
+                "text/csv; charset=utf-8",
+            ),
+            "conversations.jsonl": (
+                CATALOG.export_dir / "conversations.jsonl",
+                "application/x-ndjson; charset=utf-8",
+            ),
+        }
+        if filename not in files:
+            return self.send_error(404)
+        CATALOG.export()
+        path, content_type = files[filename]
+        if not path.is_file():
+            return self.send_error(404)
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header(
+            "Content-Disposition", f'attachment; filename="{path.name}"'
+        )
+        self.end_headers()
+        self.wfile.write(data)
 
     def set_recording(self, enabled: bool):
         global RUNTIME_RECORDING
@@ -770,7 +950,8 @@ def render_ui() -> str:
     enrolled = ", ".join(state.get("enrolled_speakers") or []) or "None"
     enrollment = html.escape(str(state.get("enrollment_target") or "None"))
     speaker_buttons = "".join(
-        f"<button onclick=\"location.href='api/enroll/{html.escape(name)}'\">I consent — enroll {html.escape(name)}</button>"
+        f"<button onclick=\"location.href='api/enroll/{html.escape(name)}'\">"
+        f"I consent — enroll {html.escape(display_speaker(name))}</button>"
         for name in OPTIONS["allowed_speakers"]
     )
     return f"""<!doctype html>
@@ -795,6 +976,15 @@ button{{font:inherit;padding:.7rem 1rem;margin:.3rem;border:0;border-radius:.6re
 <button onclick="location.href='api/enrollment/cancel'">Cancel enrollment</button>
 <button onclick="location.href='api/recording/stop'">Stop recording</button>
 <button onclick="location.href='api/digest'">Send digest now</button>
+<h2>Local conversation catalogue</h2>
+<p><strong>Indexed conversations:</strong> {int(state.get("catalog_conversations") or 0)}<br>
+<strong>Transcribed:</strong> {int(state.get("catalog_transcribed") or 0)}<br>
+<strong>Database on Pi:</strong> <code>{html.escape(str(state.get("catalog_database") or CATALOG.database_path))}</code></p>
+<p><a href="catalog/conversations.sqlite3">Download portable SQLite database</a><br>
+<a href="catalog/conversations.csv">Download conversations CSV</a><br>
+<a href="catalog/turns.csv">Download timestamped turns CSV</a><br>
+<a href="catalog/events.csv">Download recording/transcription events CSV</a><br>
+<a href="catalog/conversations.jsonl">Download complete JSONL export</a></p>
 <p>TV/background-only turns are discarded unless they occur near a verified enrolled-speaker turn. Transcripts are kept in the protected add-on share and linked from each digest. Place a visible notice and obtain consent from everyone who may be recorded.</p>
 </body></html>"""
 
@@ -808,7 +998,16 @@ def main() -> None:
     for directory in (AUDIO_DIR, TRANSCRIPT_DIR, DIGEST_DIR, SPEAKER_DIR):
         directory.mkdir(parents=True, exist_ok=True)
     cleanup_stale_partials()
+    CATALOG.initialize(AUDIO_DIR, TRANSCRIPT_DIR)
     write_status()
+    refresh_catalog_status()
+    catalog_event(
+        "app_started",
+        details={
+            "recording_enabled": bool(OPTIONS["recording_enabled"]),
+            "speaker_gate_enabled": bool(OPTIONS["speaker_gate_enabled"]),
+        },
+    )
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
     workers = [

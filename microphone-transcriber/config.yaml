@@ -1,5 +1,5 @@
 name: "Apartbrain Conversation Transcriber"
-version: "0.2.1"
+version: "0.2.2"
 slug: "apartbrain_transcriber"
 description: "Privacy-first USB microphone recording, local transcription, and weekly digests"
 url: "https://github.com/Semenka/apartbrain-apps/tree/main/microphone-transcriber"
@@ -41,6 +41,9 @@ options:
   speaker_confirmation_window_seconds: 30
   conversation_hold_minutes: 5
   conversation_reply_window_seconds: 30
+  vika_display_name: "Victoria"
+  unidentified_speaker_label: "Victoria"
+  transcription_prompt: "Apartment family conversation in Russian, Italian, or English. Speaker names: Victoria, Ale, and Andrey. Preserve the spoken language."
 schema:
   recording_enabled: bool
   language: "str"
@@ -61,3 +64,6 @@ schema:
   speaker_confirmation_window_seconds: "int(5,120)"
   conversation_hold_minutes: "int(1,60)"
   conversation_reply_window_seconds: "int(5,120)"
+  vika_display_name: "str"
+  unidentified_speaker_label: "str"
+  transcription_prompt: "str"

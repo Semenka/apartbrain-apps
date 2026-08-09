@@ -17,6 +17,7 @@ RUN pip install "faster-whisper==1.2.1" "sherpa-onnx==1.13.4" \
       "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
 
 COPY app.py /app/app.py
+COPY conversation_catalog.py /app/conversation_catalog.py
 COPY speaker_gate.py /app/speaker_gate.py
 COPY run.sh /run.sh
 RUN chmod 0755 /run.sh

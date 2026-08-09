@@ -38,6 +38,17 @@ The first transcription downloads the selected Whisper model and can take
 several minutes. `small` is the default multilingual model. Speaker
 verification and VAD use local ONNX models and work offline after installation.
 
+For this apartment, the USB microphone input is calibrated to 85%. If speech
+is still unclear, move the microphone closer before increasing it further;
+100% gain can clip nearby voices and reduce recognition quality. The optional
+`transcription_prompt` supplies household names and expected languages to
+Faster-Whisper without forcing a single language.
+
+`Vika` remains the canonical enrollment name so the existing consented voice
+sample continues to work, but the UI, new transcripts, and catalogue display
+it as `Victoria`. The `unidentified_speaker_label` option is also set to
+`Victoria` for the currently known household participant.
+
 ## Conversation and TV filtering
 
 - Two verified turns from an enrolled speaker are required to open a recording
@@ -72,6 +83,22 @@ now**. The JSON endpoint is also `GET /api/digest`.
 - Digests: `/share/apartbrain-conversations/digests/`
 - Consented speaker samples: `/share/apartbrain-conversations/speakers/`
 - Status: `/share/apartbrain-conversations/status.json`
+- Live SQLite catalogue: `/share/apartbrain-conversations/conversations.sqlite3`
+- Portable exports: `/share/apartbrain-conversations/exports/`
+
+The catalogue is created automatically on startup and backfills existing audio
+and transcript files. It contains three indexed tables:
+
+- `conversations`: one row per audio segment with recording and transcription
+  metadata;
+- `turns`: timestamped speaker/text rows for extraction and analysis;
+- `events`: recorder triggers, saved recordings, session endings, app starts,
+  and completed transcriptions.
+
+The web UI provides authenticated downloads for a consistent SQLite snapshot,
+`conversations.csv`, `turns.csv`, `events.csv`, and a complete nested
+`conversations.jsonl`. These exports are refreshed after each saved recording
+and completed transcription. They remain on the Raspberry Pi under `/share`.
 
 The weekly message links to the full transcript through the app's authenticated
 Home Assistant ingress. The files are not published under `/local/`.

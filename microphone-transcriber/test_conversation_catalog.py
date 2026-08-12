@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import concurrent.futures
 import json
 import sqlite3
 import tempfile
@@ -121,6 +122,25 @@ class ConversationCatalogTest(unittest.TestCase):
         self.assertEqual(
             event_types, {"recording_saved", "transcription_completed"}
         )
+
+    def test_concurrent_exports_share_temporary_files_safely(self) -> None:
+        audio = self.audio_dir / "2026-08-09T10-14-24Z.flac"
+        audio.write_bytes(b"audio")
+        transcript = self.transcript_dir / "2026-08-09T10-14-24Z.md"
+        transcript.write_text(SAMPLE_TRANSCRIPT, encoding="utf-8")
+        catalog = ConversationCatalog(self.root)
+        catalog.initialize(self.audio_dir, self.transcript_dir)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(catalog.export) for _ in range(32)]
+            for future in futures:
+                future.result()
+
+        snapshot = catalog.export_dir / "conversations.sqlite3"
+        with sqlite3.connect(snapshot) as connection:
+            integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+        self.assertEqual(integrity, "ok")
+        self.assertTrue((catalog.export_dir / "conversations.jsonl").is_file())
 
 
 if __name__ == "__main__":

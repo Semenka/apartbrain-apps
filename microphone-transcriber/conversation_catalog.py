@@ -442,22 +442,26 @@ class ConversationCatalog:
         return [dict(row) for row in rows]
 
     def export(self) -> None:
-        with self.lock, self._connect() as connection:
-            conversations = connection.execute(
-                "SELECT * FROM conversations ORDER BY recorded_at_utc"
-            ).fetchall()
-            turns = connection.execute(
-                "SELECT * FROM turns ORDER BY conversation_id, sequence"
-            ).fetchall()
-            events = connection.execute(
-                "SELECT * FROM events ORDER BY timestamp_utc, id"
-            ).fetchall()
+        # HTTP requests can ask for different catalogue files at the same time.
+        # Keep the lock for the complete export so those requests never share or
+        # replace the same temporary CSV, JSONL, and SQLite snapshot files.
+        with self.lock:
+            with self._connect() as connection:
+                conversations = connection.execute(
+                    "SELECT * FROM conversations ORDER BY recorded_at_utc"
+                ).fetchall()
+                turns = connection.execute(
+                    "SELECT * FROM turns ORDER BY conversation_id, sequence"
+                ).fetchall()
+                events = connection.execute(
+                    "SELECT * FROM events ORDER BY timestamp_utc, id"
+                ).fetchall()
 
-        self._write_csv("conversations.csv", conversations)
-        self._write_csv("turns.csv", turns)
-        self._write_csv("events.csv", events)
-        self._write_jsonl(conversations, turns)
-        self._write_snapshot()
+            self._write_csv("conversations.csv", conversations)
+            self._write_csv("turns.csv", turns)
+            self._write_csv("events.csv", events)
+            self._write_jsonl(conversations, turns)
+            self._write_snapshot()
 
     def _write_csv(self, filename: str, rows: list[sqlite3.Row]) -> None:
         path = self.export_dir / filename

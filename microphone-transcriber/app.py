@@ -846,6 +846,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond_json({"ok": True})
         if route.startswith("/transcript/"):
             return self.serve_transcript(route.removeprefix("/transcript/"))
+        if route.startswith("/conversation-transcript/"):
+            return self.serve_conversation_transcript(
+                route.removeprefix("/conversation-transcript/")
+            )
+        if route.startswith("/recording/"):
+            return self.serve_recording(route.removeprefix("/recording/"))
         if route.startswith("/catalog/"):
             return self.serve_catalog_file(route.removeprefix("/catalog/"))
         if route == "/":
@@ -868,6 +874,43 @@ class Handler(BaseHTTPRequestHandler):
             "background:#101827;color:#eef}pre{white-space:pre-wrap;line-height:1.5}</style></head>"
             f"<body><pre>{escaped}</pre></body></html>"
         )
+
+    def serve_conversation_transcript(self, filename: str):
+        """Render one retained conversation transcript through protected ingress."""
+        safe_name = Path(filename).name
+        if safe_name != filename or not safe_name.endswith(".md"):
+            return self.send_error(400)
+        path = TRANSCRIPT_DIR / safe_name
+        if not path.is_file():
+            return self.send_error(404)
+        escaped = html.escape(path.read_text(encoding="utf-8", errors="replace"))
+        return self.respond_html(
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<style>body{font:16px system-ui;max-width:900px;margin:2rem auto;padding:1rem;"
+            "background:#101827;color:#eef}pre{white-space:pre-wrap;overflow-wrap:anywhere;"
+            "line-height:1.5}</style></head>"
+            f"<body><pre>{escaped}</pre></body></html>"
+        )
+
+    def serve_recording(self, filename: str):
+        """Stream one retained FLAC recording through protected ingress."""
+        safe_name = Path(filename).name
+        if safe_name != filename or not safe_name.endswith(".flac"):
+            return self.send_error(400)
+        path = AUDIO_DIR / safe_name
+        if not path.is_file():
+            return self.send_error(404)
+        size = path.stat().st_size
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/flac")
+        self.send_header("Content-Length", str(size))
+        self.send_header("Content-Disposition", f'inline; filename="{path.name}"')
+        self.send_header("Cache-Control", "private, no-store")
+        self.end_headers()
+        with path.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                self.wfile.write(chunk)
 
     def serve_catalog_file(self, filename: str):
         files = {

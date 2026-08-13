@@ -86,6 +86,11 @@ now**. The JSON endpoint is also `GET /api/digest`.
 - Live SQLite catalogue: `/share/apartbrain-conversations/conversations.sqlite3`
 - Portable exports: `/share/apartbrain-conversations/exports/`
 
+The protected app ingress also exposes each retained conversation transcript
+and FLAC recording individually. These links are intended for the Home
+Assistant conversation-library dashboard and require an authenticated Home
+Assistant session; they are not published under `/local`.
+
 The catalogue is created automatically on startup and backfills existing audio
 and transcript files. It contains three indexed tables:
 

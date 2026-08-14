@@ -45,7 +45,9 @@ after installation.
 Recordings are retained as lossless mono FLAC at 48 kHz. Transcription and
 speaker matching use a separate in-memory 16 kHz signal with rumble/high-frequency
 noise removed and quiet speech dynamically normalized. The stored recording is
-never overwritten by that processing.
+never overwritten by that processing. Decoder windows are kept independent and
+repeated n-grams are penalized to prevent background noise from turning one
+misheard Russian phrase into a repeated hallucination near the end of a segment.
 
 For this apartment, the USB microphone input is calibrated to 85%. If speech
 is still unclear, move the microphone closer before increasing it further;

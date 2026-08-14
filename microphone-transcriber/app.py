@@ -34,6 +34,11 @@ STATUS_PATH = OUTPUT_ROOT / "status.json"
 SPEAKER_DIR = OUTPUT_ROOT / "speakers"
 SPEAKER_MODEL = Path("/opt/models/3dspeaker-campplus.onnx")
 VAD_MODEL = Path("/opt/models/silero-vad.onnx")
+WHISPER_MODEL_DIR = Path("/data/models")
+SOURCE_SAMPLE_RATE = 48000
+# Remove handling/room rumble and out-of-band noise, then raise quiet speech
+# without clipping louder nearby voices. The retained FLAC stays unfiltered.
+SPEECH_FILTER = "highpass=f=80,lowpass=f=7600,dynaudnorm=f=250:g=7:p=0.90:m=8"
 STOP = threading.Event()
 WAKE_TRANSCRIBER = threading.Event()
 MODEL: WhisperModel | None = None
@@ -48,7 +53,7 @@ def load_options() -> dict:
     defaults = {
         "recording_enabled": False,
         "language": "auto",
-        "model": "small",
+        "model": "turbo",
         "segment_minutes": 30,
         "retention_days": 30,
         "digest_weekday": 0,
@@ -105,6 +110,9 @@ STATUS = {
     "catalog_conversations": 0,
     "catalog_transcribed": 0,
     "catalog_updated_at": None,
+    "transcription_model": str(OPTIONS["model"]),
+    "source_sample_rate": SOURCE_SAMPLE_RATE,
+    "speech_enhancement": True,
 }
 
 
@@ -353,11 +361,13 @@ def recording_loop() -> None:
             "-ac",
             "1",
             "-ar",
-            "16000",
+            str(SOURCE_SAMPLE_RATE),
             "-t",
             str(seconds),
             "-c:a",
             "flac",
+            "-compression_level",
+            "8",
             "-y",
             str(partial),
         ]
@@ -418,8 +428,13 @@ def get_model() -> WhisperModel:
     with MODEL_LOCK:
         if MODEL is None:
             LOG.info("Loading local Whisper model %s", OPTIONS["model"])
+            WHISPER_MODEL_DIR.mkdir(parents=True, exist_ok=True)
             MODEL = WhisperModel(
-                str(OPTIONS["model"]), device="cpu", compute_type="int8"
+                str(OPTIONS["model"]),
+                device="cpu",
+                compute_type="int8",
+                download_root=str(WHISPER_MODEL_DIR),
+                cpu_threads=max(1, min(4, os.cpu_count() or 2)),
             )
         return MODEL
 
@@ -434,6 +449,8 @@ def decode_audio_pcm(path: Path) -> np.ndarray:
             "-nostdin",
             "-i",
             str(path),
+            "-af",
+            SPEECH_FILTER,
             "-ac",
             "1",
             "-ar",
@@ -451,12 +468,18 @@ def decode_audio_pcm(path: Path) -> np.ndarray:
 def transcribe_file(audio_path: Path) -> Path:
     language = None if OPTIONS["language"] == "auto" else str(OPTIONS["language"])
     prompt = str(OPTIONS["transcription_prompt"]).strip() or None
+    # Decode once so transcription and speaker identification use the same
+    # cleaned speech signal, while the original high-quality FLAC is retained.
+    pcm = decode_audio_pcm(audio_path)
     segments, info = get_model().transcribe(
-        str(audio_path),
+        pcm,
         language=language,
         initial_prompt=prompt,
         vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 500},
         beam_size=5,
+        condition_on_previous_text=True,
+        word_timestamps=False,
     )
     candidates = []
     for segment in segments:
@@ -478,7 +501,6 @@ def transcribe_file(audio_path: Path) -> Path:
         else "speaker gate disabled"
     )
     if bool(OPTIONS["speaker_gate_enabled"]) and candidates:
-        pcm = decode_audio_pcm(audio_path)
         gate = get_gate()
         allowed = set(OPTIONS["allowed_speakers"])
         for candidate in candidates:
@@ -536,6 +558,7 @@ def transcribe_file(audio_path: Path) -> Path:
     body = (
         f"# Conversation transcript\n\n"
         f"- Audio segment: `{audio_path.name}`\n"
+        f"- Transcription model: `{OPTIONS['model']}` (enhanced speech audio)\n"
         f"- Detected language: `{info.language}` ({info.language_probability:.0%})\n"
         f"- Recorded: `{created_label}`\n\n"
         f"- Conversation filter: `{filter_note}`\n\n"

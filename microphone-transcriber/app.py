@@ -478,7 +478,11 @@ def transcribe_file(audio_path: Path) -> Path:
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500},
         beam_size=5,
-        condition_on_previous_text=True,
+        # Independent windows prevent a mistaken phrase near the end of a
+        # noisy segment from feeding a repetition loop into later windows.
+        condition_on_previous_text=False,
+        repetition_penalty=1.1,
+        no_repeat_ngram_size=3,
         word_timestamps=False,
     )
     candidates = []

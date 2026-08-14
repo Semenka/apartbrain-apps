@@ -1,5 +1,5 @@
 name: "Apartbrain Conversation Transcriber"
-version: "0.2.3"
+version: "0.2.4"
 slug: "apartbrain_transcriber"
 description: "Privacy-first USB microphone recording, local transcription, and weekly digests"
 url: "https://github.com/Semenka/apartbrain-apps/tree/main/microphone-transcriber"
@@ -22,7 +22,7 @@ map:
 options:
   recording_enabled: false
   language: "auto"
-  model: "small"
+  model: "turbo"
   segment_minutes: 30
   retention_days: 30
   digest_weekday: 0
@@ -47,7 +47,7 @@ options:
 schema:
   recording_enabled: bool
   language: "str"
-  model: "list(tiny|base|small|medium)"
+  model: "list(tiny|base|small|medium|large-v3-turbo|turbo)"
   segment_minutes: "int(1,60)"
   retention_days: "int(1,365)"
   digest_weekday: "int(0,6)"

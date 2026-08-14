@@ -35,14 +35,24 @@ link to the full timestamped transcript.
    `last_transcript` advance in the app web UI.
 
 The first transcription downloads the selected Whisper model and can take
-several minutes. `small` is the default multilingual model. Speaker
-verification and VAD use local ONNX models and work offline after installation.
+several minutes. `turbo` (`large-v3-turbo`) is the default multilingual model:
+it is substantially more accurate than `small` for Russian while its shortened
+decoder keeps it practical on an 8 GB Raspberry Pi. The model cache is kept in
+the app's persistent `/data/models` directory so an app update does not download
+it again. Speaker verification and VAD use local ONNX models and work offline
+after installation.
+
+Recordings are retained as lossless mono FLAC at 48 kHz. Transcription and
+speaker matching use a separate in-memory 16 kHz signal with rumble/high-frequency
+noise removed and quiet speech dynamically normalized. The stored recording is
+never overwritten by that processing.
 
 For this apartment, the USB microphone input is calibrated to 85%. If speech
 is still unclear, move the microphone closer before increasing it further;
 100% gain can clip nearby voices and reduce recognition quality. The optional
 `transcription_prompt` supplies household names and expected languages to
-Faster-Whisper without forcing a single language.
+Faster-Whisper without forcing a single language. Keep `language: auto` for this
+multilingual home; Russian, Italian, and English are detected per recording.
 
 `Vika` remains the canonical enrollment name so the existing consented voice
 sample continues to work, but the UI, new transcripts, and catalogue display
